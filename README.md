@@ -1,3 +1,5 @@
 # Implementation of GQA and GQA uptraining
-This repository contains an implementation of the constributions described in ***GQA: Training Generalized Multi-Query Transformer Models from
-Multi-Head Checkpoints***
+This repository contains an implementation of the constributions described in [***GQA: Training Generalized Multi-Query Transformer Models from
+Multi-Head Checkpoints***](https://arxiv.org/pdf/2305.13245v3)
+
+Causal multi-headded dot product self-attention is an important mechanism in modern transformer langauge models. Implementing exact attention in a way that efficiently utilizes the hardware can be difficult. Many approximation methods now exist. The earlier [***Multi-Query Attention***](https://arxiv.org/pdf/1911.02150), introduced in 2019, suggested that all the heads in the attention layer would have their own queries, but share the same keys and values. MQA acheived significant speedup at nearly the performance of normal multi-headed attention (MHA). GQA first proposes a generalization of MHA and MQA. GQA suggests that we can select a group size, wherein certain groups of heads will share the same keys and queries, but won't share between groups. With a group size of 1, this is equivalent to exact MHA, and with a group size the same as the total number of heads, it is equivalent to MQA, with just a single set of keys and queries for all heads.
