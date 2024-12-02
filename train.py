@@ -15,9 +15,12 @@ MAIN = __name__ == "__main__"
 device = t.device("cuda" if t.cuda.is_available() else "cpu")
 print(bold, red, underline, f"device set to {device}", endc)
 
+# Boilerplate autoregressive training code
 def trained(cfg: modelConfig, targs: trainingConfig, load=None):
     n_train_iter, n_test_iter = targs.train_tokens//targs.batch_size, targs.test_tokens//targs.batch_size
+    
     model = gpt2(cfg, targs)
+
     if isinstance(load, str): # if we're loading a model from a file
         model.load(load)
     elif isinstance(load, OrderedDict): # if we're loading a model from a state_dict
@@ -25,43 +28,43 @@ def trained(cfg: modelConfig, targs: trainingConfig, load=None):
 
     print(bold, purple, f"model of {sum(param.numel() for param in model.parameters()):,} params created on {device}", endc)
 
-    wandb.init(project=targs.wandb_project, name=targs.wandb_name)
+    wandb.init(project=targs.wandb_project, name=targs.wandb_name) # initialize wandb for visualization
     wandb.watch(model)
 
-    tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
+    tokenizer = GPT2TokenizerFast.from_pretrained('gpt2') # load in gpt2's tokenizer
     tokenizer.add_special_tokens({'pad_token': '<PAD>'})
     def dataset_tokenize_func(examples):
         return tokenizer(examples['text'], truncation=True, padding='max_length', max_length=cfg.n_ctx, return_tensors='pt')
 
-    #dataset_title, dataset_name  = "wikitext",  "wikitext-103-raw-v1"
-    dataset_title, dataset_name  = "HuggingFaceFW/fineweb-edu", "sample-10BT"
+    dataset_title, dataset_name  = "HuggingFaceFW/fineweb-edu", "sample-10BT" # huggingface dataset
     print(f"{yellow}loading raw dataset: {dataset_title} ({dataset_name}){endc}")
-    dataset = datasets.load_dataset(dataset_title, name=dataset_name, split="train", streaming=True).map(dataset_tokenize_func, batched=True) 
-    trainloader = t.utils.data.DataLoader(dataset, batch_size=targs.batch_size)
+    dataset = datasets.load_dataset(dataset_title, name=dataset_name, split="train", streaming=True).map(dataset_tokenize_func, batched=True) # load the dataset
+    trainloader = t.utils.data.DataLoader(dataset, batch_size=targs.batch_size) # create a dataloader for the trainset and testset
     testloader = t.utils.data.DataLoader(dataset, batch_size=targs.batch_size)
     
     print(f"{yellow}train and test dataloaders created{endc}")
 
     nbatch = 0
-    for epoch in range(targs.epochs):
+    for epoch in range(targs.epochs): # training loop
         testloss, testacc = 0, 0
         with t.inference_mode():
             testiter, testrange = iter(testloader), trange(n_test_iter, ncols=120, desc="testing. . .")
-            for i in testrange:
+            for i in testrange: # testing loop, averaging the loss and accuracy over the test tokens
                 toks = next(testiter)['input_ids'].to(device)
                 logits = model.forward(toks)
                 testloss += model.loss(logits, toks).item()
                 testacc += model.accuracy(logits, toks).item()
             testloss /= n_test_iter
             testacc /= n_test_iter
-        wandb.log({"testloss": testloss, "testacc": testacc})
+        wandb.log({"testloss": testloss, "testacc": testacc}) # log the test loss and accuracy to wandb
 
-        print(yellow, yap := model.yap("Harry Potter", show=False), endc)
+        # generate a completion from the model based on a prompt to inspect its progress
+        print(yellow, yap := model.yap("George Washington was", show=False), endc) 
         model.log_completion(yap)
 
         model.train()
         trainiter, trainrange = iter(trainloader), trange(n_train_iter, ncols=120)
-        for i in trainrange:
+        for i in trainrange: # training loop, updating weights
             toks = next(trainiter)['input_ids'].to(device)
             logits = model.forward(toks)
             loss = model.loss(logits, toks)
@@ -71,11 +74,11 @@ def trained(cfg: modelConfig, targs: trainingConfig, load=None):
                 wandb.log({"trainloss": loss})
                 trainrange.set_description(f"{bold+purple}[{epoch}/{targs.epochs}] {blue}loss:{loss:.4f} acc:{testacc:.6f} testloss:{testloss:.6f}")
 
-        if targs.save_name is not None:
+        if targs.save_name is not None: # save the model after each epoch
             t.save(model, targs.save_name + ".pth")
 
     testloss, testacc = 0, 0
-    with t.inference_mode():
+    with t.inference_mode(): # final test after training
         testiter, testrange = iter(testloader), trange(n_test_iter, ncols=120, desc="testing. . .")
         for i in testrange:
             toks = next(testiter)['input_ids'].to(device)
@@ -95,6 +98,7 @@ def trained(cfg: modelConfig, targs: trainingConfig, load=None):
     model.eval()
     return model
 
+# (read attention implementations first)
 # This is the other main contribution of the paper: we can take a model trained with normal MHA layers
 # and convert it to GQA with a percentage of the original pretraining compute. This function performs
 # that conversion given a path to a saved, normal pretrained MHA model.
@@ -124,11 +128,12 @@ def convert_MHA_to_GQA(model_name: str, gqa_cfg: modelConfig, uptraining_cfg: tr
     starting_model = gpt2(gqa_cfg, uptraining_cfg)
     starting_model.load_state_dict(sdict)
 
-    return starting_model, gqa
+    return gqa
 
 if MAIN:
     t.manual_seed(0)
     
+    # pretraining a model with normal multi-head attention
     MHA_model_cfg = modelConfig(attention_type="MHA")
     MHA_pretrain_cfg = trainingConfig(
         lr=3e-4,
@@ -138,15 +143,17 @@ if MAIN:
         wandb_name="mha_pretrain",
         save_name="gpt2s_mha"
     )
-    mha_model = trained(MHA_model_cfg, MHA_pretrain_cfg)
+    mha_model = trained(MHA_model_cfg, MHA_pretrain_cfg) 
     
+    # converting the model to GQA attention via uptraining
     GQA_model_cfg = modelConfig(attention_type="GQA", head_group_size=4)
     GQA_uptrain_cfg = trainingConfig(
-        lr=1e-4,
+        lr=1e-4, # pretraining happens with lower learning rate
         batch_size=8,
-        train_tokens=10_000,
+        train_tokens=10_000, # and on far fewer tokens
         test_tokens=1_000,
         wandb_name="gpa_uptrain",
         save_name="gpt2s_gqa_uptrained"
     )
-    starting_model, gqa_model = convert_MHA_to_GQA("gpt2s_mha", GQA_model_cfg, GQA_uptrain_cfg)
+    gqa_model = convert_MHA_to_GQA("gpt2s_mha", GQA_model_cfg, GQA_uptrain_cfg)
+

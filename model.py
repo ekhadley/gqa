@@ -58,18 +58,19 @@ class MultiHeadAttention(nn.Module):
         batch, seq, _ = resid.shape
 
         # do the key, query, and value projections for every head simultaneously.
-        #qkv = einops.einsum(resid, self.W_in, "batch seq d_model, d_model kqv n_heads d_head -> batch seq kqv n_heads d_head") + self.b_in
         q = einops.einsum(resid, self.W_Q, "batch seq d_model, d_model n_heads d_head -> batch seq n_heads d_head")
         k = einops.einsum(resid, self.W_K, "batch seq d_model, d_model n_heads d_head -> batch seq n_heads d_head")
         v = einops.einsum(resid, self.W_V, "batch seq d_model, d_model n_heads d_head -> batch seq n_heads d_head")
 
         # This does the dot product between all possible pairs of query and value vectors.
-        # We use different dimension names 'qseq' and 'kseq' to refer to the query sequence dimension and the key sequence dimension, but here keys and queries come from the same sequence.
+        # We use different dimension names 'qseq' and 'kseq' to refer to the query sequence dimension and the key sequence dimension,
+        # but here keys and queries come from the same sequence.
         # This is what makes it 'self-attention'.
         # We divide by the sqrt of the d_head dimension for numerical stability reasons, as recommended in 'Attention Is All You Need'
         scores = einops.einsum(q, k, "batch qseq n_heads d_head, batch kseq n_heads d_head -> batch n_heads qseq kseq") / math.sqrt(self.cfg.d_head) 
 
-        # This sets values above the main diagonal to a large negative number. This means the model can't move information backwards (from a later token to an earlier one).  This is what makes it 'causal'.
+        # This sets values above the main diagonal to a large negative number. This means the model can't move information
+        # backwards (from a later token to an earlier one).  This is what makes it 'causal'.
         causal_mask = t.triu(t.ones(seq, seq, device=device), diagonal=1).bool()
         scores = scores.masked_fill(causal_mask.to(scores.device), -1e6)
 
@@ -90,15 +91,12 @@ class MultiQueryAttention(nn.Module):
         self.cfg = cfg
         
         self.W_Q = nn.Parameter(t.empty(cfg.d_model, cfg.n_heads, cfg.d_head)) # We still have a query for each head, 
-        self.W_K = nn.Parameter(t.empty(cfg.d_model, cfg.d_head)) # but only one key,
+        self.W_K = nn.Parameter(t.empty(cfg.d_model, cfg.d_head)) # but only one key per head,
         self.W_V = nn.Parameter(t.empty(cfg.d_model, cfg.d_head)) # and one value.
         nn.init.xavier_uniform_(self.W_Q) # initialize the weights of the input projections
         nn.init.xavier_uniform_(self.W_K) 
         nn.init.xavier_uniform_(self.W_V) 
 
-        nn.init.xavier_uniform_(self.W_in) # initialize the input projection 
-
-        # output projection from final averaged value vectors (length d_head) back to normal residual vectors (length d_model)
         self.W_out = nn.Parameter(t.empty(cfg.d_head, cfg.n_heads, cfg.d_model))
         self.b_out = nn.Parameter(t.zeros(cfg.d_model))
         nn.init.xavier_uniform_(self.W_out) # initialize the output projection 
@@ -165,6 +163,7 @@ class GroupedQueryAttention(nn.Module):
         out = einops.einsum(z, self.W_out, "batch seq n_heads d_head, d_head n_heads d_model -> batch seq d_model") + self.b_out
         return out
 
+# classic transformer block. residual network, layernorm->attention, add to residual, layernorm->mlp, add to residual.
 class tblock(nn.Module):
     def __init__(self, cfg: modelConfig, targs: trainingConfig):
         super().__init__()
@@ -194,6 +193,8 @@ class tblock(nn.Module):
         post_mlp = post_attn + mlp_out
         return post_mlp
 
+# putting all the layers together, with token embeddings, learned positional embeddings, and a final linear layer to get logits.
+# also has optimizer and some convenience functions for training and performance inspection.
 class gpt2(nn.Module):
     def __init__(self, cfg, targs):
         super().__init__()
@@ -258,4 +259,5 @@ class gpt2(nn.Module):
         wandb.log({"completion": table})
     def load(self, path):
         self.load_state_dict(t.load(path).state_dict())
+
 
