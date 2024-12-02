@@ -19,6 +19,23 @@ Due to the fact that the GQA paper's code is not open source and they do not go 
 
 In `model.py` there are definitions for the whole model, including implementations of MHA, MQA, and GQA.
 
-Running the `train.py` file will pretrain a gpt2-sm model using normal MHA and save this to disk. It will then convert the pretrained MHA model to GQA by the method recommended in the paper. Finally, it performs the uptraining step to let the model accomodate the changes, and saves this converted model to disk.
+Running the `train.py` file will pretrain a gpt2-sm model using normal MHA and save this to disk. It will then convert the pretrained MHA model to GQA by the method recommended in the paper. Finally, it performs the uptraining step to let the model accomodate the changes, and saves this converted model to disk. Pretraining with GQA is easily acheived by changing the model config.
 
-Descriptions of all the functions and their workings are contained in comments throughout. Most of the paper-implementation work is contained in the `GroupedQueryAttention` class in `model.py` and the `convert_MHA_to_GQA` function in `train.py`, the rest is pretty boilerplate.
+Explanations of the code are contained in comments throughout. Most of the paper-implementation work is contained in the `GroupedQueryAttention` class in `model.py` and `convert_MHA_to_GQA`, the uptraining step, in `train.py`, the rest is pretty boilerplate. Skimming all the attention implementations is recommended to get an idea of the important differences between each.
+
+### Results:
+![alt text](image.png)  
+(pretraining and uptraining loss curves (in pink and orange respectively) for the model+training configurations in the training file.)
+
+We see that at the start of uptraining, our loss has spiked way up due to the modifications we made to the weights, but falls back down to the pretrained loss with around a tenth of the training steps. These results could be much nicer however, as this model was vastly undertrained and undertuned due to computational and time constraints. Despite this, we still definitely see the converted model has nearly identical performance after the uptraining step despite a reduction in number of overall parameters.
+
+### Running the Code
+I did all this on Windows 10 in an anaconda environment using python 3.12.0. This works for me:
+```
+git clone https://github.com/ekhadley/gqa
+```
+cd to the installed repo and then
+```
+pip install -r requirements.txt
+```
+Pytorch can be installed via pip or conda: `pip3 install torch --index-url https://download.pytorch.org/whl/cu124`
